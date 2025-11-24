@@ -92,11 +92,27 @@ export function createMember(body: {
   });
 }
 
+export function updateMember(
+  id: string,
+  body: Partial<{
+    name: string;
+    email: string;
+    phone?: string;
+    membership_date?: string;
+  }>,
+) {
+  return request(`/members/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
 export function deleteMember(id: string) {
   return request(`/members/${id}`, {
     method: 'DELETE',
   });
 }
+
 
 // ====== LOANS ======
 export function getLoans(params?: { activeOnly?: boolean }) {

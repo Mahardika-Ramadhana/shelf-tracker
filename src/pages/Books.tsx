@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -37,7 +37,7 @@ import { Plus, Search, Edit, Trash2, CheckCircle, XCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 
-import { getBooks, createBook, deleteBook } from "@/lib/api";
+import { getBooks, createBook, updateBook, deleteBook } from "@/lib/api";
 
 type Book = {
   book_id: string;
@@ -48,29 +48,31 @@ type Book = {
   is_available: boolean;
 };
 
-const genres = ["Computer Science", "Programming", "Fiction", "Non-Fiction", "Science", "History", "Biography", "Fantasy", "Mystery", "Romance", "Horror", "Self-Help", "Health", "Travel", "Children's", ];
+const GENRES = ["Computer Science", "Programming", "Fiction", "Non-Fiction", "History", "Horror"];
 
 export default function Books() {
   const [searchQuery, setSearchQuery] = useState("");
   const [filterGenre, setFilterGenre] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
 
   const [books, setBooks] = useState<Book[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // state form tambah buku
-  const [newTitle, setNewTitle] = useState("");
-  const [newAuthor, setNewAuthor] = useState("");
-  const [newYear, setNewYear] = useState("");
-  const [newGenre, setNewGenre] = useState("");
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [editingBook, setEditingBook] = useState<Book | null>(null);
 
-  // ambil data buku dari backend
+  // form state
+  const [formTitle, setFormTitle] = useState("");
+  const [formAuthor, setFormAuthor] = useState("");
+  const [formYear, setFormYear] = useState("");
+  const [formGenre, setFormGenre] = useState("");
+
   async function loadBooks() {
     try {
       setLoading(true);
       const res = await getBooks({ page: 1, limit: 100 });
-      setBooks(res.data as Book[]);
+      const data = (res as any).data ?? res;
+      setBooks(data as Book[]);
     } catch (err: any) {
       console.error(err);
       toast.error("Gagal memuat data buku");
@@ -83,34 +85,58 @@ export default function Books() {
     loadBooks();
   }, []);
 
-  const handleAddBook = async () => {
-    if (!newTitle.trim() || !newAuthor.trim()) {
+  const openCreateDialog = () => {
+    setEditingBook(null);
+    setFormTitle("");
+    setFormAuthor("");
+    setFormYear("");
+    setFormGenre("");
+    setIsDialogOpen(true);
+  };
+
+  const openEditDialog = (book: Book) => {
+    setEditingBook(book);
+    setFormTitle(book.title);
+    setFormAuthor(book.author);
+    setFormYear(book.publication_year ? String(book.publication_year) : "");
+    setFormGenre(book.genre || "");
+    setIsDialogOpen(true);
+  };
+
+  const handleSaveBook = async () => {
+    if (!formTitle.trim() || !formAuthor.trim()) {
       toast.error("Judul dan penulis wajib diisi");
       return;
     }
 
     try {
-      await createBook({
-        title: newTitle,
-        author: newAuthor,
-        genre: newGenre || undefined,
-        publication_year: newYear ? Number(newYear) : undefined,
-      });
+      if (editingBook) {
+        // UPDATE
+        await updateBook(editingBook.book_id, {
+          title: formTitle.trim(),
+          author: formAuthor.trim(),
+          genre: formGenre || undefined,
+          publication_year: formYear ? Number(formYear) : undefined,
+        });
+        toast.success("Buku berhasil diperbarui!");
+      } else {
+        // CREATE
+        await createBook({
+          title: formTitle.trim(),
+          author: formAuthor.trim(),
+          genre: formGenre || undefined,
+          publication_year: formYear ? Number(formYear) : undefined,
+        });
+        toast.success("Buku berhasil ditambahkan!");
+      }
 
-      toast.success("Buku berhasil ditambahkan!");
       setIsDialogOpen(false);
-
-      // reset form
-      setNewTitle("");
-      setNewAuthor("");
-      setNewYear("");
-      setNewGenre("");
-
-      // refresh daftar buku
       await loadBooks();
     } catch (err: any) {
       console.error(err);
-      toast.error("Gagal menambahkan buku");
+      toast.error(
+        editingBook ? "Gagal memperbarui buku" : "Gagal menambahkan buku",
+      );
     }
   };
 
@@ -127,22 +153,24 @@ export default function Books() {
     }
   };
 
-  // filter di sisi frontend
-  const filteredBooks = books.filter((book) => {
-    const matchesSearch =
-      book.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      book.author.toLowerCase().includes(searchQuery.toLowerCase());
+  const filteredBooks = useMemo(() => {
+    return books.filter((book) => {
+      const q = searchQuery.toLowerCase();
+      const matchSearch =
+        book.title.toLowerCase().includes(q) ||
+        book.author.toLowerCase().includes(q);
 
-    const matchesGenre =
-      filterGenre === "all" || book.genre === filterGenre;
+      const matchGenre =
+        filterGenre === "all" || (book.genre || "") === filterGenre;
 
-    const matchesStatus =
-      filterStatus === "all" ||
-      (filterStatus === "available" && book.is_available) ||
-      (filterStatus === "borrowed" && !book.is_available);
+      const matchStatus =
+        filterStatus === "all" ||
+        (filterStatus === "available" && book.is_available) ||
+        (filterStatus === "borrowed" && !book.is_available);
 
-    return matchesSearch && matchesGenre && matchesStatus;
-  });
+      return matchSearch && matchGenre && matchStatus;
+    });
+  }, [books, searchQuery, filterGenre, filterStatus]);
 
   return (
     <div className="space-y-6">
@@ -155,16 +183,18 @@ export default function Books() {
         </div>
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
           <DialogTrigger asChild>
-            <Button className="gap-2">
+            <Button className="gap-2" onClick={openCreateDialog}>
               <Plus className="h-4 w-4" />
               Tambah Buku
             </Button>
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Tambah Buku Baru</DialogTitle>
+              <DialogTitle>
+                {editingBook ? "Edit Buku" : "Tambah Buku Baru"}
+              </DialogTitle>
               <DialogDescription>
-                Masukkan informasi buku yang akan ditambahkan
+                Masukkan informasi buku yang akan {editingBook ? "diperbarui" : "ditambahkan"}
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
@@ -173,8 +203,8 @@ export default function Books() {
                 <Input
                   id="title"
                   placeholder="Masukkan judul buku"
-                  value={newTitle}
-                  onChange={(e) => setNewTitle(e.target.value)}
+                  value={formTitle}
+                  onChange={(e) => setFormTitle(e.target.value)}
                 />
               </div>
               <div className="grid gap-2">
@@ -182,8 +212,8 @@ export default function Books() {
                 <Input
                   id="author"
                   placeholder="Masukkan nama penulis"
-                  value={newAuthor}
-                  onChange={(e) => setNewAuthor(e.target.value)}
+                  value={formAuthor}
+                  onChange={(e) => setFormAuthor(e.target.value)}
                 />
               </div>
               <div className="grid gap-2">
@@ -192,21 +222,21 @@ export default function Books() {
                   id="year"
                   type="number"
                   placeholder="2024"
-                  value={newYear}
-                  onChange={(e) => setNewYear(e.target.value)}
+                  value={formYear}
+                  onChange={(e) => setFormYear(e.target.value)}
                 />
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="genre">Genre</Label>
                 <Select
-                  value={newGenre}
-                  onValueChange={(value) => setNewGenre(value)}
+                  value={formGenre || undefined}
+                  onValueChange={setFormGenre}
                 >
                   <SelectTrigger id="genre">
                     <SelectValue placeholder="Pilih genre" />
                   </SelectTrigger>
                   <SelectContent>
-                    {genres.map((genre) => (
+                    {GENRES.map((genre) => (
                       <SelectItem key={genre} value={genre}>
                         {genre}
                       </SelectItem>
@@ -216,10 +246,15 @@ export default function Books() {
               </div>
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
+              <Button
+                variant="outline"
+                onClick={() => setIsDialogOpen(false)}
+              >
                 Batal
               </Button>
-              <Button onClick={handleAddBook}>Simpan</Button>
+              <Button onClick={handleSaveBook}>
+                {editingBook ? "Simpan Perubahan" : "Simpan"}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -250,7 +285,7 @@ export default function Books() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Semua Genre</SelectItem>
-                {genres.map((genre) => (
+                {GENRES.map((genre) => (
                   <SelectItem key={genre} value={genre}>
                     {genre}
                   </SelectItem>
@@ -293,14 +328,10 @@ export default function Books() {
               ) : (
                 filteredBooks.map((book) => (
                   <TableRow key={book.book_id}>
-                    <TableCell className="font-medium">
-                      {book.title}
-                    </TableCell>
+                    <TableCell className="font-medium">{book.title}</TableCell>
                     <TableCell>{book.author}</TableCell>
-                    <TableCell>
-                      {book.publication_year ?? "-"}
-                    </TableCell>
-                    <TableCell>{book.genre ?? "-"}</TableCell>
+                    <TableCell>{book.publication_year ?? "-"}</TableCell>
+                    <TableCell>{book.genre || "-"}</TableCell>
                     <TableCell>
                       {book.is_available ? (
                         <Badge variant="outline" className="gap-1">
@@ -316,7 +347,11 @@ export default function Books() {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
-                        <Button variant="ghost" size="icon">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => openEditDialog(book)}
+                        >
                           <Edit className="h-4 w-4" />
                         </Button>
                         <Button

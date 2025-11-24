@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -29,7 +29,12 @@ import { Label } from "@/components/ui/label";
 import { Plus, Search, Edit, Trash2, History } from "lucide-react";
 import { toast } from "sonner";
 
-import { getMembers, createMember, deleteMember } from "@/lib/api";
+import {
+  getMembers,
+  createMember,
+  updateMember,
+  deleteMember,
+} from "@/lib/api";
 
 type Member = {
   member_id: string;
@@ -46,16 +51,17 @@ export default function Members() {
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // state form tambah anggota
-  const [newName, setNewName] = useState("");
-  const [newEmail, setNewEmail] = useState("");
-  const [newPhone, setNewPhone] = useState("");
+  const [editingMember, setEditingMember] = useState<Member | null>(null);
+
+  // form state
+  const [formName, setFormName] = useState("");
+  const [formEmail, setFormEmail] = useState("");
+  const [formPhone, setFormPhone] = useState("");
 
   async function loadMembers() {
     try {
       setLoading(true);
       const res = await getMembers();
-      // backend bisa mengembalikan array langsung atau { data: [...] }
       const data = Array.isArray(res) ? res : (res as any).data;
       setMembers(data as Member[]);
     } catch (err: any) {
@@ -70,30 +76,52 @@ export default function Members() {
     loadMembers();
   }, []);
 
-  const handleAddMember = async () => {
-    if (!newName.trim() || !newEmail.trim()) {
+  const openCreateDialog = () => {
+    setEditingMember(null);
+    setFormName("");
+    setFormEmail("");
+    setFormPhone("");
+    setIsDialogOpen(true);
+  };
+
+  const openEditDialog = (member: Member) => {
+    setEditingMember(member);
+    setFormName(member.name);
+    setFormEmail(member.email);
+    setFormPhone(member.phone || "");
+    setIsDialogOpen(true);
+  };
+
+  const handleSaveMember = async () => {
+    if (!formName.trim() || !formEmail.trim()) {
       toast.error("Nama dan email wajib diisi");
       return;
     }
 
     try {
-      await createMember({
-        name: newName,
-        email: newEmail,
-        phone: newPhone || undefined,
-      });
+      if (editingMember) {
+        await updateMember(editingMember.member_id, {
+          name: formName.trim(),
+          email: formEmail.trim(),
+          phone: formPhone || undefined,
+        });
+        toast.success("Anggota berhasil diperbarui!");
+      } else {
+        await createMember({
+          name: formName.trim(),
+          email: formEmail.trim(),
+          phone: formPhone || undefined,
+        });
+        toast.success("Anggota berhasil ditambahkan!");
+      }
 
-      toast.success("Anggota berhasil ditambahkan!");
       setIsDialogOpen(false);
-
-      setNewName("");
-      setNewEmail("");
-      setNewPhone("");
-
       await loadMembers();
     } catch (err: any) {
       console.error(err);
-      toast.error("Gagal menambahkan anggota");
+      toast.error(
+        editingMember ? "Gagal memperbarui anggota" : "Gagal menambahkan anggota",
+      );
     }
   };
 
@@ -114,13 +142,15 @@ export default function Members() {
     toast.info("Fitur riwayat peminjaman akan segera tersedia!");
   };
 
-  const filteredMembers = members.filter((member) => {
+  const filteredMembers = useMemo(() => {
     const q = searchQuery.toLowerCase();
-    return (
-      member.name.toLowerCase().includes(q) ||
-      member.email.toLowerCase().includes(q)
-    );
-  });
+    return members.filter((member) => {
+      return (
+        member.name.toLowerCase().includes(q) ||
+        member.email.toLowerCase().includes(q)
+      );
+    });
+  }, [members, searchQuery]);
 
   return (
     <div className="space-y-6">
@@ -133,16 +163,19 @@ export default function Members() {
         </div>
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
           <DialogTrigger asChild>
-            <Button className="gap-2">
+            <Button className="gap-2" onClick={openCreateDialog}>
               <Plus className="h-4 w-4" />
               Tambah Anggota
             </Button>
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Tambah Anggota Baru</DialogTitle>
+              <DialogTitle>
+                {editingMember ? "Edit Anggota" : "Tambah Anggota Baru"}
+              </DialogTitle>
               <DialogDescription>
-                Masukkan informasi anggota yang akan didaftarkan
+                Masukkan informasi anggota yang akan{" "}
+                {editingMember ? "diperbarui" : "didaftarkan"}
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
@@ -151,8 +184,8 @@ export default function Members() {
                 <Input
                   id="name"
                   placeholder="Masukkan nama lengkap"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
+                  value={formName}
+                  onChange={(e) => setFormName(e.target.value)}
                 />
               </div>
               <div className="grid gap-2">
@@ -161,8 +194,8 @@ export default function Members() {
                   id="email"
                   type="email"
                   placeholder="email@example.com"
-                  value={newEmail}
-                  onChange={(e) => setNewEmail(e.target.value)}
+                  value={formEmail}
+                  onChange={(e) => setFormEmail(e.target.value)}
                 />
               </div>
               <div className="grid gap-2">
@@ -171,16 +204,21 @@ export default function Members() {
                   id="phone"
                   type="tel"
                   placeholder="08123456789"
-                  value={newPhone}
-                  onChange={(e) => setNewPhone(e.target.value)}
+                  value={formPhone}
+                  onChange={(e) => setFormPhone(e.target.value)}
                 />
               </div>
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
+              <Button
+                variant="outline"
+                onClick={() => setIsDialogOpen(false)}
+              >
                 Batal
               </Button>
-              <Button onClick={handleAddMember}>Simpan</Button>
+              <Button onClick={handleSaveMember}>
+                {editingMember ? "Simpan Perubahan" : "Simpan"}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -234,13 +272,17 @@ export default function Members() {
                     <TableCell>
                       {member.membership_date
                         ? new Date(member.membership_date).toLocaleDateString(
-                            "id-ID"
+                            "id-ID",
                           )
                         : "-"}
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
-                        <Button variant="ghost" size="icon">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => openEditDialog(member)}
+                        >
                           <Edit className="h-4 w-4" />
                         </Button>
                         <Button
