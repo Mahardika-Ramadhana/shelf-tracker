@@ -1,5 +1,12 @@
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -13,49 +20,103 @@ import { CheckCircle, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
+import { getFines, markFinePaid } from "@/lib/api";
+
+type FineRow = {
+  id: string;
+  memberName: string;
+  bookTitle: string;
+  amount: number;
+  fineDate: string;
+  daysOverdue?: number; // hanya untuk yang belum lunas
+  paidDate?: string; // hanya untuk yang sudah lunas
+};
+
 export default function Fines() {
-  // Mock data - unpaid fines
-  const unpaidFines = [
-    {
-      id: 1,
-      memberName: "Ahmad Wijaya",
-      bookTitle: "Introduction to Algorithms",
-      amount: 15000,
-      fine_date: "2024-01-16",
-      daysOverdue: 5,
-    },
-    {
-      id: 2,
-      memberName: "Budi Santoso",
-      bookTitle: "The Pragmatic Programmer",
-      amount: 9000,
-      fine_date: "2024-01-13",
-      daysOverdue: 3,
-    },
-  ];
+  const [unpaidFines, setUnpaidFines] = useState<FineRow[]>([]);
+  const [paidFines, setPaidFines] = useState<FineRow[]>([]);
+  const [loading, setLoading] = useState(false);
 
-  // Mock data - paid fines
-  const paidFines = [
-    {
-      id: 3,
-      memberName: "Siti Nurhaliza",
-      bookTitle: "Clean Code",
-      amount: 6000,
-      fine_date: "2024-01-05",
-      paid_date: "2024-01-08",
-    },
-    {
-      id: 4,
-      memberName: "Ahmad Wijaya",
-      bookTitle: "Design Patterns",
-      amount: 12000,
-      fine_date: "2023-12-28",
-      paid_date: "2024-01-02",
-    },
-  ];
+  useEffect(() => {
+    loadFines();
+  }, []);
 
-  const handleMarkPaid = (id: number) => {
-    toast.success("Denda berhasil ditandai lunas!");
+  async function loadFines() {
+    try {
+      setLoading(true);
+
+      const [unpaidRes, paidRes] = await Promise.all([
+        getFines({ isPaid: false }),
+        getFines({ isPaid: true }),
+      ]);
+
+      const unpaidData = (unpaidRes as any).data ?? unpaidRes;
+      const paidData = (paidRes as any).data ?? paidRes;
+
+      setUnpaidFines(
+        (unpaidData as any[]).map((fine) => {
+          const loan = fine.loan || {};
+          const member = loan.member || {};
+          const book = loan.book || {};
+
+          // hitung keterlambatan dari due_date vs fine_date / hari ini (fallback)
+          const due =
+            loan.due_date || loan.dueDate
+              ? new Date(loan.due_date || loan.dueDate)
+              : null;
+          const fineDate =
+            fine.fine_date || fine.fineDate
+              ? new Date(fine.fine_date || fine.fineDate)
+              : null;
+          const now = new Date();
+          const base = due || fineDate || now;
+          const diffMs = now.getTime() - base.getTime();
+          const days = Math.max(1, Math.round(diffMs / (1000 * 60 * 60 * 24)));
+
+          return {
+            id: fine.fine_id || fine.id,
+            memberName: member.name || "Nama tidak tersedia",
+            bookTitle: book.title || "Judul tidak tersedia",
+            amount: fine.amount,
+            fineDate: (fine.fine_date || fine.fineDate || "").toString(),
+            daysOverdue: days,
+          } as FineRow;
+        }),
+      );
+
+      setPaidFines(
+        (paidData as any[]).map((fine) => {
+          const loan = fine.loan || {};
+          const member = loan.member || {};
+          const book = loan.book || {};
+
+          return {
+            id: fine.fine_id || fine.id,
+            memberName: member.name || "Nama tidak tersedia",
+            bookTitle: book.title || "Judul tidak tersedia",
+            amount: fine.amount,
+            fineDate: (fine.fine_date || fine.fineDate || "").toString(),
+            paidDate: (fine.paid_date || fine.paidDate || "").toString(),
+          } as FineRow;
+        }),
+      );
+    } catch (err: any) {
+      console.error(err);
+      toast.error("Gagal memuat data denda");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const handleMarkPaid = async (id: string) => {
+    try {
+      await markFinePaid(id);
+      toast.success("Denda berhasil ditandai lunas!");
+      await loadFines();
+    } catch (err: any) {
+      console.error(err);
+      toast.error("Gagal menandai denda lunas");
+    }
   };
 
   const formatCurrency = (amount: number) => {
@@ -77,7 +138,9 @@ export default function Fines() {
       <Card>
         <CardHeader>
           <CardTitle>Daftar Denda</CardTitle>
-          <CardDescription>Lacak status pembayaran denda anggota</CardDescription>
+          <CardDescription>
+            Lacak status pembayaran denda anggota
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <Tabs defaultValue="unpaid" className="w-full">
@@ -91,82 +154,110 @@ export default function Fines() {
                 Sudah Lunas
               </TabsTrigger>
             </TabsList>
-            
+
             <TabsContent value="unpaid" className="mt-4">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Nama Peminjam</TableHead>
-                    <TableHead>Judul Buku</TableHead>
-                    <TableHead>Jumlah Denda</TableHead>
-                    <TableHead>Tanggal Denda</TableHead>
-                    <TableHead>Keterlambatan</TableHead>
-                    <TableHead className="text-right">Aksi</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {unpaidFines.map((fine) => (
-                    <TableRow key={fine.id}>
-                      <TableCell className="font-medium">{fine.memberName}</TableCell>
-                      <TableCell>{fine.bookTitle}</TableCell>
-                      <TableCell className="font-semibold text-destructive">
-                        {formatCurrency(fine.amount)}
-                      </TableCell>
-                      <TableCell>{fine.fine_date}</TableCell>
-                      <TableCell>
-                        <Badge variant="destructive">
-                          {fine.daysOverdue} hari
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="gap-2"
-                          onClick={() => handleMarkPaid(fine.id)}
-                        >
-                          <CheckCircle className="h-4 w-4" />
-                          Tandai Lunas
-                        </Button>
-                      </TableCell>
+              {loading ? (
+                <p>Memuat data...</p>
+              ) : unpaidFines.length === 0 ? (
+                <p>Tidak ada denda yang belum lunas.</p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Nama Peminjam</TableHead>
+                      <TableHead>Judul Buku</TableHead>
+                      <TableHead>Jumlah Denda</TableHead>
+                      <TableHead>Tanggal Denda</TableHead>
+                      <TableHead>Keterlambatan</TableHead>
+                      <TableHead className="text-right">Aksi</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {unpaidFines.map((fine) => (
+                      <TableRow key={fine.id}>
+                        <TableCell className="font-medium">
+                          {fine.memberName}
+                        </TableCell>
+                        <TableCell>{fine.bookTitle}</TableCell>
+                        <TableCell className="font-semibold text-destructive">
+                          {formatCurrency(fine.amount)}
+                        </TableCell>
+                        <TableCell>
+                          {fine.fineDate
+                            ? new Date(fine.fineDate).toLocaleDateString("id-ID")
+                            : "-"}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="destructive">
+                            {fine.daysOverdue} hari
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="gap-2"
+                            onClick={() => handleMarkPaid(fine.id)}
+                          >
+                            <CheckCircle className="h-4 w-4" />
+                            Tandai Lunas
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
             </TabsContent>
 
             <TabsContent value="paid" className="mt-4">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Nama Peminjam</TableHead>
-                    <TableHead>Judul Buku</TableHead>
-                    <TableHead>Jumlah Denda</TableHead>
-                    <TableHead>Tanggal Denda</TableHead>
-                    <TableHead>Tanggal Pembayaran</TableHead>
-                    <TableHead>Status</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {paidFines.map((fine) => (
-                    <TableRow key={fine.id}>
-                      <TableCell className="font-medium">{fine.memberName}</TableCell>
-                      <TableCell>{fine.bookTitle}</TableCell>
-                      <TableCell className="font-semibold text-muted-foreground">
-                        {formatCurrency(fine.amount)}
-                      </TableCell>
-                      <TableCell>{fine.fine_date}</TableCell>
-                      <TableCell>{fine.paid_date}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className="gap-1">
-                          <CheckCircle className="h-3 w-3" />
-                          Lunas
-                        </Badge>
-                      </TableCell>
+              {loading ? (
+                <p>Memuat data...</p>
+              ) : paidFines.length === 0 ? (
+                <p>Belum ada riwayat denda yang sudah lunas.</p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Nama Peminjam</TableHead>
+                      <TableHead>Judul Buku</TableHead>
+                      <TableHead>Jumlah Denda</TableHead>
+                      <TableHead>Tanggal Denda</TableHead>
+                      <TableHead>Tanggal Pembayaran</TableHead>
+                      <TableHead>Status</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {paidFines.map((fine) => (
+                      <TableRow key={fine.id}>
+                        <TableCell className="font-medium">
+                          {fine.memberName}
+                        </TableCell>
+                        <TableCell>{fine.bookTitle}</TableCell>
+                        <TableCell className="font-semibold text-muted-foreground">
+                          {formatCurrency(fine.amount)}
+                        </TableCell>
+                        <TableCell>
+                          {fine.fineDate
+                            ? new Date(fine.fineDate).toLocaleDateString("id-ID")
+                            : "-"}
+                        </TableCell>
+                        <TableCell>
+                          {fine.paidDate
+                            ? new Date(fine.paidDate).toLocaleDateString("id-ID")
+                            : "-"}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="gap-1">
+                            <CheckCircle className="h-3 w-3" />
+                            Lunas
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
             </TabsContent>
           </Tabs>
         </CardContent>

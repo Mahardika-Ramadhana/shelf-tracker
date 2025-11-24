@@ -1,7 +1,13 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -31,50 +37,112 @@ import { Plus, Search, Edit, Trash2, CheckCircle, XCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 
+import { getBooks, createBook, deleteBook } from "@/lib/api";
+
+type Book = {
+  book_id: string;
+  title: string;
+  author: string;
+  publication_year?: number;
+  genre?: string;
+  is_available: boolean;
+};
+
+const genres = ["Computer Science", "Programming", "Fiction", "Non-Fiction", "Science", "History", "Biography", "Fantasy", "Mystery", "Romance", "Horror", "Self-Help", "Health", "Travel", "Children's", ];
+
 export default function Books() {
   const [searchQuery, setSearchQuery] = useState("");
   const [filterGenre, setFilterGenre] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
 
-  // Mock data
-  const books = [
-    {
-      id: 1,
-      title: "Introduction to Algorithms",
-      author: "Thomas H. Cormen",
-      publication_year: 2009,
-      genre: "Computer Science",
-      is_available: true,
-    },
-    {
-      id: 2,
-      title: "Clean Code",
-      author: "Robert C. Martin",
-      publication_year: 2008,
-      genre: "Programming",
-      is_available: false,
-    },
-    {
-      id: 3,
-      title: "The Pragmatic Programmer",
-      author: "Andrew Hunt",
-      publication_year: 1999,
-      genre: "Programming",
-      is_available: true,
-    },
-  ];
+  const [books, setBooks] = useState<Book[]>([]);
+  const [loading, setLoading] = useState(false);
 
-  const genres = ["Computer Science", "Programming", "Fiction", "Non-Fiction"];
+  // state form tambah buku
+  const [newTitle, setNewTitle] = useState("");
+  const [newAuthor, setNewAuthor] = useState("");
+  const [newYear, setNewYear] = useState("");
+  const [newGenre, setNewGenre] = useState("");
 
-  const handleAddBook = () => {
-    toast.success("Buku berhasil ditambahkan!");
-    setIsDialogOpen(false);
+  // ambil data buku dari backend
+  async function loadBooks() {
+    try {
+      setLoading(true);
+      const res = await getBooks({ page: 1, limit: 100 });
+      setBooks(res.data as Book[]);
+    } catch (err: any) {
+      console.error(err);
+      toast.error("Gagal memuat data buku");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadBooks();
+  }, []);
+
+  const handleAddBook = async () => {
+    if (!newTitle.trim() || !newAuthor.trim()) {
+      toast.error("Judul dan penulis wajib diisi");
+      return;
+    }
+
+    try {
+      await createBook({
+        title: newTitle,
+        author: newAuthor,
+        genre: newGenre || undefined,
+        publication_year: newYear ? Number(newYear) : undefined,
+      });
+
+      toast.success("Buku berhasil ditambahkan!");
+      setIsDialogOpen(false);
+
+      // reset form
+      setNewTitle("");
+      setNewAuthor("");
+      setNewYear("");
+      setNewGenre("");
+
+      // refresh daftar buku
+      await loadBooks();
+    } catch (err: any) {
+      console.error(err);
+      toast.error("Gagal menambahkan buku");
+    }
   };
 
-  const handleDeleteBook = (id: number) => {
-    toast.success("Buku berhasil dihapus!");
+  const handleDeleteBook = async (id: string) => {
+    if (!confirm("Yakin ingin menghapus buku ini?")) return;
+
+    try {
+      await deleteBook(id);
+      toast.success("Buku berhasil dihapus!");
+      await loadBooks();
+    } catch (err: any) {
+      console.error(err);
+      toast.error("Gagal menghapus buku");
+    }
   };
+
+  // filter di sisi frontend
+  const filteredBooks = books.filter((book) => {
+    const matchesSearch =
+      book.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      book.author.toLowerCase().includes(searchQuery.toLowerCase());
+
+    const matchesGenre =
+      filterGenre === "all" || book.genre === filterGenre;
+
+    const matchesStatus =
+      filterStatus === "all" ||
+      (filterStatus === "available" && book.is_available) ||
+      (filterStatus === "borrowed" && !book.is_available);
+
+    return matchesSearch && matchesGenre && matchesStatus;
+  });
 
   return (
     <div className="space-y-6">
@@ -102,19 +170,38 @@ export default function Books() {
             <div className="grid gap-4 py-4">
               <div className="grid gap-2">
                 <Label htmlFor="title">Judul Buku</Label>
-                <Input id="title" placeholder="Masukkan judul buku" />
+                <Input
+                  id="title"
+                  placeholder="Masukkan judul buku"
+                  value={newTitle}
+                  onChange={(e) => setNewTitle(e.target.value)}
+                />
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="author">Penulis</Label>
-                <Input id="author" placeholder="Masukkan nama penulis" />
+                <Input
+                  id="author"
+                  placeholder="Masukkan nama penulis"
+                  value={newAuthor}
+                  onChange={(e) => setNewAuthor(e.target.value)}
+                />
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="year">Tahun Terbit</Label>
-                <Input id="year" type="number" placeholder="2024" />
+                <Input
+                  id="year"
+                  type="number"
+                  placeholder="2024"
+                  value={newYear}
+                  onChange={(e) => setNewYear(e.target.value)}
+                />
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="genre">Genre</Label>
-                <Select>
+                <Select
+                  value={newGenre}
+                  onValueChange={(value) => setNewGenre(value)}
+                >
                   <SelectTrigger id="genre">
                     <SelectValue placeholder="Pilih genre" />
                   </SelectTrigger>
@@ -141,7 +228,9 @@ export default function Books() {
       <Card>
         <CardHeader>
           <CardTitle>Daftar Buku</CardTitle>
-          <CardDescription>Cari dan filter buku berdasarkan kategori</CardDescription>
+          <CardDescription>
+            Cari dan filter buku berdasarkan kategori
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {/* Search and Filters */}
@@ -193,41 +282,55 @@ export default function Books() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {books.map((book) => (
-                <TableRow key={book.id}>
-                  <TableCell className="font-medium">{book.title}</TableCell>
-                  <TableCell>{book.author}</TableCell>
-                  <TableCell>{book.publication_year}</TableCell>
-                  <TableCell>{book.genre}</TableCell>
-                  <TableCell>
-                    {book.is_available ? (
-                      <Badge variant="outline" className="gap-1">
-                        <CheckCircle className="h-3 w-3" />
-                        Tersedia
-                      </Badge>
-                    ) : (
-                      <Badge variant="secondary" className="gap-1">
-                        <XCircle className="h-3 w-3" />
-                        Dipinjam
-                      </Badge>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-2">
-                      <Button variant="ghost" size="icon">
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleDeleteBook(book.id)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
+              {loading ? (
+                <TableRow>
+                  <TableCell colSpan={6}>Memuat data...</TableCell>
                 </TableRow>
-              ))}
+              ) : filteredBooks.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={6}>Tidak ada buku</TableCell>
+                </TableRow>
+              ) : (
+                filteredBooks.map((book) => (
+                  <TableRow key={book.book_id}>
+                    <TableCell className="font-medium">
+                      {book.title}
+                    </TableCell>
+                    <TableCell>{book.author}</TableCell>
+                    <TableCell>
+                      {book.publication_year ?? "-"}
+                    </TableCell>
+                    <TableCell>{book.genre ?? "-"}</TableCell>
+                    <TableCell>
+                      {book.is_available ? (
+                        <Badge variant="outline" className="gap-1">
+                          <CheckCircle className="h-3 w-3" />
+                          Tersedia
+                        </Badge>
+                      ) : (
+                        <Badge variant="secondary" className="gap-1">
+                          <XCircle className="h-3 w-3" />
+                          Dipinjam
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-2">
+                        <Button variant="ghost" size="icon">
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleDeleteBook(book.book_id)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
             </TableBody>
           </Table>
         </CardContent>
